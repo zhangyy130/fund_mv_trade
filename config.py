@@ -3,7 +3,11 @@
 import os
 
 # 数据存储路径
-DB_PATH = os.path.join(os.path.dirname(__file__), "data", "fund.db")
+# 本地运行：项目目录下的 data/fund.db
+# Codespaces：/workspaces/<repo>/data/fund.db（持久化）
+_DB_DIR = os.path.join(os.path.dirname(__file__), "data")
+os.makedirs(_DB_DIR, exist_ok=True)
+DB_PATH = os.path.join(_DB_DIR, "fund.db")
 
 # 均线周期列表
 MA_PERIODS = [5, 10, 20, 30, 60, 120, 250]
