@@ -79,6 +79,49 @@ def rule_ma_cross_multi(crosses: list[tuple[int, int]]) -> Rule:
     return Rule(name=names, check=check)
 
 
+def detect_ma_alignment(df: pd.DataFrame, periods: list[int], direction: str = "bull") -> pd.Series:
+    """检测多条均线多头/空头排列首日"""
+    if len(periods) < 2:
+        return pd.Series(False, index=df.index)
+
+    cols = [f"ma_{p}" for p in periods]
+    if any(col not in df.columns for col in cols):
+        return pd.Series(False, index=df.index)
+
+    if direction == "bull":
+        aligned = pd.Series(True, index=df.index)
+        for earlier, later in zip(cols, cols[1:]):
+            aligned &= df[earlier] > df[later]
+    else:
+        aligned = pd.Series(True, index=df.index)
+        for earlier, later in zip(cols, cols[1:]):
+            aligned &= df[earlier] < df[later]
+
+    prev_aligned = aligned.shift(1).fillna(False)
+    return (aligned & ~prev_aligned).fillna(False)
+
+
+def rule_ma_alignment(periods: list[int], direction: str = "bull") -> Rule:
+    """多条均线多头/空头排列首日"""
+    sorted_periods = sorted(set(periods))
+    col_label = "/".join(str(p) for p in sorted_periods)
+    if direction == "bull":
+        name = f"MA{col_label}多头排列首日"
+        description = f"{col_label}日均线首次进入多头排列"
+    else:
+        name = f"MA{col_label}空头排列首日"
+        description = f"{col_label}日均线首次进入空头排列"
+
+    def check(row, df):
+        idx = row.name
+        if idx < 1:
+            return False
+        signals = detect_ma_alignment(df[[f"ma_{p}" for p in sorted_periods]], sorted_periods, direction)
+        return bool(signals.iloc[idx]) if idx < len(signals) else False
+
+    return Rule(name=name, check=check, description=description)
+
+
 # ── 内置卖出规则工厂 ──
 
 def rule_profit_sell(target_pct: float, sell_ratio: float) -> Rule:
@@ -183,6 +226,16 @@ class StrategyRegistry:
             buy_rules=[rule_ma_cross_multi([(5, 10), (5, 20)])],
             sell_rules=[rule_profit_sell(10, 0.5)],
         ),
+        "MA5/10/20多头排列首日": lambda: Strategy(
+            name="MA5/10/20多头排列首日",
+            buy_rules=[rule_ma_alignment([5, 10, 20], "bull")],
+            sell_rules=[rule_profit_sell(10, 0.5)],
+        ),
+        "MA5/10/20空头排列首日卖出": lambda: Strategy(
+            name="MA5/10/20空头排列首日卖出",
+            buy_rules=[rule_ma_turn_up(5)],
+            sell_rules=[rule_ma_alignment([5, 10, 20], "bear")],
+        ),
     }
 
     @classmethod
@@ -199,10 +252,12 @@ class StrategyRegistry:
         name: str,
         buy_ma_turn: list[int] = None,
         buy_ma_cross: list[tuple[int, int]] = None,
+        buy_ma_align: list[list[int]] = None,
         sell_profit: float = None,
         sell_profit_ratio: float = 0.5,
         sell_stop_loss: float = None,
         sell_ma_break: int = None,
+        sell_ma_bear_align: list[list[int]] = None,
     ) -> Strategy:
         """从 UI 参数构建自定义策略"""
         buy_rules = []
@@ -214,6 +269,9 @@ class StrategyRegistry:
                 buy_rules.append(rule_ma_cross(*buy_ma_cross[0]))
             else:
                 buy_rules.append(rule_ma_cross_multi(buy_ma_cross))
+        if buy_ma_align:
+            for group in buy_ma_align:
+                buy_rules.append(rule_ma_alignment(group, "bull"))
 
         sell_rules = []
         if sell_profit is not None:
@@ -222,5 +280,22 @@ class StrategyRegistry:
             sell_rules.append(rule_stop_loss(sell_stop_loss))
         if sell_ma_break is not None:
             sell_rules.append(rule_ma_break_down(sell_ma_break))
+        if sell_ma_bear_align:
+            for group in sell_ma_bear_align:
+                sell_rules.append(rule_ma_alignment(group, "bear"))
 
         return Strategy(name=name, buy_rules=buy_rules, sell_rules=sell_rules)
+
+    @classmethod
+    def build_from_params(cls, name: str, params: dict) -> Strategy:
+        return cls.build_custom(
+            name=name,
+            buy_ma_turn=params.get("buy_ma_turn"),
+            buy_ma_cross=params.get("buy_ma_cross"),
+            buy_ma_align=params.get("buy_ma_align"),
+            sell_profit=params.get("sell_profit"),
+            sell_profit_ratio=params.get("sell_profit_ratio", 0.5),
+            sell_stop_loss=params.get("sell_stop_loss"),
+            sell_ma_break=params.get("sell_ma_break"),
+            sell_ma_bear_align=params.get("sell_ma_bear_align"),
+        )

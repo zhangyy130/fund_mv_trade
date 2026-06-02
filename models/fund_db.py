@@ -205,3 +205,11 @@ class FundDB:
             ]
         finally:
             conn.close()
+
+    def delete_strategy(self, name: str):
+        conn = self._get_conn()
+        try:
+            conn.execute("DELETE FROM strategies WHERE name = ?", (name,))
+            conn.commit()
+        finally:
+            conn.close()

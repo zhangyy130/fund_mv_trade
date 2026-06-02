@@ -7,6 +7,7 @@ from datetime import datetime, timedelta
 from controllers.fund_manager import FundManager
 from controllers.strategy import StrategyRegistry, Strategy
 from controllers.backtester import Backtester
+from models.fund_db import FundDB
 from config import BACKTEST_INITIAL_CAPITAL
 
 
@@ -29,12 +30,29 @@ def render(mgr: FundManager):
         strategy_name = st.selectbox("选择策略", StrategyRegistry.list_names(), key="bt_strategy")
         strategy = StrategyRegistry.get(strategy_name)
     else:
-        custom = st.session_state.get("custom_strategy")
-        if custom is None:
-            st.warning("请先在「策略配置」页创建自定义策略")
-            return
-        strategy = custom
-        st.write(f"使用自定义策略: **{strategy.name}**")
+        db = FundDB()
+        saved_strategies = db.list_strategies()
+        saved_names = [item["name"] for item in saved_strategies]
+
+        if saved_names:
+            options = ["当前自定义策略"] + saved_names
+            selected_strategy = st.selectbox("选择自定义策略", options, key="bt_custom_choice")
+            if selected_strategy != "当前自定义策略":
+                saved = next(item for item in saved_strategies if item["name"] == selected_strategy)
+                strategy = StrategyRegistry.build_from_params(saved["name"], saved["params"])
+                st.write(f"使用已保存策略: **{strategy.name}**")
+            else:
+                strategy = st.session_state.get("custom_strategy")
+                if strategy is None:
+                    st.warning("请先在「策略配置」页创建自定义策略")
+                    return
+                st.write(f"使用最近创建的自定义策略: **{strategy.name}**")
+        else:
+            strategy = st.session_state.get("custom_strategy")
+            if strategy is None:
+                st.warning("请先在「策略配置」页创建自定义策略")
+                return
+            st.write(f"使用自定义策略: **{strategy.name}**")
 
     # 时间段
     col1, col2, col3 = st.columns(3)
